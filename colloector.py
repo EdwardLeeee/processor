@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 import json
 from datetime import datetime
+import re
 
 app = Flask(__name__)
 
@@ -15,6 +16,7 @@ def log_to_file(log_entry):
 @app.route('/log', methods=['POST'])
 def receive_log():
     log_entry = request.get_json()
+
 
     # 將日誌紀錄到文件
     log_to_file(log_entry)
