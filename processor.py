@@ -2,6 +2,9 @@ import configparser
 import subprocess
 import requests
 from datetime import datetime
+import time
+
+url = 'http://localhost:5050/log'
 #-----host name/ip-------------
 subprocess.run(['chmod', '+x', 'get_host_info.sh']) # 設定腳本權限
 result = subprocess.run(['./get_host_info.sh'], capture_output=True, text=True) # 調用腳本並輸出
@@ -54,7 +57,9 @@ for i in range(1,log_amount+1):
             'LOG_TIME': log_time
         }
 
-        response = requests.post('http://localhost:5050/log', json=log_data, headers=headers)
+        response = requests.post(url, json=log_data, headers=headers)
 
         # 输出响应内容
-        print(f"Status Code: {response.status_code}")
+        print(f"Status Code: {response.status_code} , Message : {response.json().get('message','N/A')}")
+        #print(f"Status Code: {response.status_code} ")
+        time.sleep(1)

@@ -2,8 +2,12 @@ from flask import Flask, request, jsonify
 import json
 from datetime import datetime
 import re
+import requests
+
 
 app = Flask(__name__)
+
+url = 'http://localhost:5000/log'
 
 # 定義日誌文件路徑
 log_file_path = 'received_logs.json'
@@ -41,25 +45,42 @@ def receive_log():
         match = pattern.search(content)
 
         if match:
-            # 提取 log_time、level 和 message（假設正則表達式有捕獲組）
-            log_time = match.group(1) if match.lastindex >= 1 else 'N/A'
-            level = match.group(2) if match.lastindex >= 2 else 'N/A'
-            content = match.group(3) if match.lastindex >= 3 else 'N/A'
+            # 提取 log_time、level 和 message（假設正則表達式有捕獲到 group）
+            log_time = match.group('time')
+            level = match.group('level')
+            content = match.group('message')
+
+            # 確保所有群組都被匹配
+            if not (log_time and level and content):
+                return jsonify({"status": "error", "message": "wrong content"}), 401
 
             # 將提取的內容添加到日誌條目中
-            log_entry['LOG_TIME'] = extracted_log_time
-            log_entry['LEVEL'] = extracted_level
+            log_entry['LOG_TIME'] = log_time
+            log_entry['LEVEL'] = level
             log_entry['CONTENT'] = content
         else:
             return jsonify({"status": "error", "message": "wrong regex"}), 401
 
+        # 在记录日志之前删除 REGEX 键
+        del log_entry['REGEX']
+
         # 紀錄日誌
         log_to_file(log_entry)
 
+        response = requests.post(url, json=log_entry)
+        if response.status_code == 201:
+            print('success')
+        else:
+            print(f" Error: { response.json().get('message') } ")
+
         return jsonify({"status": "success"}), 201
+
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5050)
-
+    # 201 : 成功
+    # 401 : 錯誤regex
+    # 400 : JSON 資料有缺失
+    # 500 : 非上述異常
