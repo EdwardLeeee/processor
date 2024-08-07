@@ -71,7 +71,9 @@ def receive_log():
         if response.status_code == 201:
             print('success')
         else:
-            print(f" Error: { response.json().get('message') } ")
+            message = response.json().get('message')
+            print(f" Error: {message}")
+            return jsonify({"status": "error", "message":message}), response.status_code
 
         return jsonify({"status": "success"}), 201
 
