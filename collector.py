@@ -70,12 +70,12 @@ def receive_log():
         response = requests.post(url, json=log_entry)
         if response.status_code == 201:
             print('success')
+            return jsonify({"status": "success"}), 201
         else:
             message = response.json().get('message')
             print(f" Error: {message}")
             return jsonify({"status": "error", "message":message}), response.status_code
 
-        return jsonify({"status": "success"}), 201
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
