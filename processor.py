@@ -26,7 +26,9 @@ config.read('/home/oraclelee/Desktop/collector/config/config.conf')
 
 log_amount = sum(len(section) for section in config.values())
 
-for i in range(1,log_amount+1):
+# 計算 section 的數量
+num_sections = len(config.sections())
+for i in range(1,num_sections+1):
     system_type = config.get(f'LOG{i}', 'SYSTEM_TYPE')
     process_name = config.get(f'LOG{i}', 'PROCESS_NAME')
     regex = config.get(f'LOG{i}', 'REGEX')
@@ -62,4 +64,3 @@ for i in range(1,log_amount+1):
         # 输出响应内容
         print(f"Status Code: {response.status_code} , Message : {response.json().get('message','N/A')}")
         #print(f"Status Code: {response.status_code} ")
-        time.sleep(1)
