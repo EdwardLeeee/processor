@@ -9,6 +9,8 @@
 負責去接收客戶打過來的初始資料，並依照客戶端提供 Regex 格式切割傳近來的 Raw Data ，
 成功切割後 post 給負責將 data 寫入 data base 的 microservice。
 
+本程式會使用 watchdog 套件來對 log 做即時監控,只要有新增的 log 便會 post 出去
+
 ## 執行
 
 ### server 端
