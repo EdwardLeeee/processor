@@ -1,66 +1,144 @@
-import configparser
 import subprocess
+import os
+import socket
+import platform
+import json
 import requests
+import yaml
+import re
 from datetime import datetime
-import time
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
-url = 'http://localhost:5050/log'
-#-----host name/ip-------------
-subprocess.run(['chmod', '+x', 'get_host_info.sh']) # 設定腳本權限
-result = subprocess.run(['./get_host_info.sh'], capture_output=True, text=True) # 調用腳本並輸出
+# 配置檔案路徑(全域變數)
+config_file = '/home/oraclelee/Desktop/collector/config/config.cfg'
+offsets_file = '/home/oraclelee/Desktop/collector/config/offsets.json'
 
-host_name = None
-host_ip = None
-for line in result.stdout.splitlines(): # 解析输出结果
-    if line.startswith("HOST_NAME="):
-        host_name = line.split('=', 1)[1].strip() # 只切一次，取後面
-    elif line.startswith("HOST_IP="):
-        host_ip = line.split('=', 1)[1].strip()
+# 讀取yaml格式之配置檔案
+def load_config(config_file):
+    with open(config_file, 'r') as f:
+        config = yaml.safe_load(f)
+    return config
 
-if not host_name or not host_ip:
-    raise ValueError("HOST_NAME or HOST_IP not found in script output")
+config = load_config(config_file)
 
-#----抓配置-----------------
-config = configparser.ConfigParser() # 讀配置文件
-config.read('/home/oraclelee/Desktop/collector/config/config.conf')
+# 保存偏移量
+def save_offsets(offsets):
+    with open(offsets_file, 'w') as f:
+        # dump 是把資料結構轉成JSON
+        json.dump(offsets, f, indent=4) # indent=4 是讓它可以一個key一行,比較好看
 
-log_amount = sum(len(section) for section in config.values())
+# 讀取偏移量
+def load_offsets():
+    if not os.path.exists(offsets_file):#指定路徑 該檔案是否存在
+        return {}
+    with open(offsets_file, 'r') as f:
+        return json.load(f)
 
-# 計算 section 的數量
-num_sections = len(config.sections())
-for i in range(1,num_sections+1):
-    system_type = config.get(f'LOG{i}', 'SYSTEM_TYPE')
-    process_name = config.get(f'LOG{i}', 'PROCESS_NAME')
-    regex = config.get(f'LOG{i}', 'REGEX')
+offsets = load_offsets()
+print("offsets: ", offsets)
 
-    # 抓路徑
-    input_file_path = config.get(f'LOG{i}', 'file_path')
+# 取得主機資訊
+def get_host_info():
+    subprocess.run(['chmod', '+x', 'get_host_info.sh']) # 設定腳本權限
+    result = subprocess.run(['./get_host_info.sh'], capture_output=True, text=True) # 調用腳本並輸出host_name = None
+    host_ip = None
+    for line in result.stdout.splitlines(): # 解析输出结果
+        if line.startswith("HOST_NAME="):
+            host_name = line.split('=', 1)[1].strip() # 只切一次，取後面
+        elif line.startswith("HOST_IP="):
+            host_ip = line.split('=', 1)[1].strip()
 
-    # 讀寫big5編碼之log
-    with open(input_file_path, 'r', encoding='big5', errors='replace') as input_file:
-        lines = input_file.readlines()
+    if not host_name or not host_ip:
+        raise ValueError("HOST_NAME or HOST_IP not found in script output")
+    return host_name , host_ip
 
-    # 設置 Content-Type 頭為 application/json; charset=utf-8
-    headers = {
-    'Content-Type': 'application/json; charset=utf-8'
-    }
+host_name, ip_address = get_host_info()
 
-    for line in lines:
-        content = line.strip() # 去除行尾的空白字符
+# 檔案變更處理類
+class LogHandler(FileSystemEventHandler):
+    def __init__(self, config):
+        self.config = config
+        self.offsets = offsets
 
-        log_time = datetime.now().strftime('%Y%m%d%H%M%S')
-        log_data = {
-            'HOST_NAME': host_name,
-            'HOST_IP': host_ip,
-            'SYSTEM_TYPE': system_type,
-            'PROCESS_NAME': process_name,
-            'REGEX': regex,
-            'CONTENT': content,
-            'LOG_TIME': log_time
-        }
+    def on_modified(self, event):
+        if event.is_directory:
+            return
+        # print("New log data added.")
+        self.process(event.src_path)
 
-        response = requests.post(url, json=log_data, headers=headers)
+    def process(self, file_path):
+        for log_config in self.config['logs']:
+            if log_config['file_path'] == file_path:
+                print("Now handling file:", file_path)
+                self.handle_log(log_config)
 
-        # 输出响应内容
-        print(f"Status Code: {response.status_code} , Message : {response.json().get('message','N/A')}")
-        #print(f"Status Code: {response.status_code} ")
+    def handle_log(self, log_config):
+        file_path = log_config['file_path']
+        last_offset = self.offsets.get(file_path, 0)
+        print("last_offset: ", last_offset)
+
+        with open(file_path, 'r', encoding='big5', errors='ignore') as f:
+            lines = f.readlines()
+            print("lines length:", len(lines))
+
+        new_lines = []  # 确保 new_lines 有默认值
+        # 如果新行數大於上次記錄的偏移量，處理新增加的行
+        if last_offset < len(lines):
+            new_lines = lines[last_offset:]
+            self.offsets[file_path] = len(lines)
+            save_offsets(self.offsets)
+
+        # 處理新增加的 log 行
+        for line in new_lines:
+            fields = log_config['fields']
+            regex = {
+                "log_time_regex": fields['log_time'],
+                "level_regex": fields['level'],
+                "message_regex": fields['content']
+            }
+            # 組合 Format A 的資料
+            log_data = {
+                "HOST_NAME": host_name,
+                "HOST_IP": ip_address,
+                "SYSTEM_TYPE": log_config['system_type'],
+                "PROCESS_NAME": os.path.basename(log_config['file_path']).split('.')[0],
+                "REGEX": regex,
+                "RAW_LOG": line.strip(),
+                "TIMESTAMP": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            # 發送資料到 Collector
+            self.send_to_collector(log_data)
+
+    def send_to_collector(self, log_data):
+        try:
+            response = requests.post('http://localhost:5050/log', json=log_data)
+            if response.status_code == 201:
+                print(f"Success , {response.status_code} , messsage : {response.json().get('message','N/A')}" )
+            else:
+                print(f"Error , {response.status_code} , messsage : {response.json().get('message','N/A')}" )
+        except requests.exceptions.RequestException as e:
+            print('hello')
+            print(f"Error sending log data to collector: {e}")
+
+if __name__ == "__main__":
+    config = load_config(config_file)
+    event_handler = LogHandler(config)
+    observer = Observer()
+
+    # 為每個 log 文件監視變化
+    for log_config in config['logs']:
+        print("Content of the config: ")
+        print("File Path:", log_config['file_path'])
+        print("System Type:", log_config['system_type'])
+        print("Regex:", log_config['fields'])
+        print()
+        observer.schedule(event_handler, path=os.path.dirname(log_config['file_path']), recursive=False)
+
+    observer.start()
+    try:
+        while True:
+            pass
+    except KeyboardInterrupt:
+        observer.stop()
+    observer.join()
