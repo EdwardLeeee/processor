@@ -54,7 +54,7 @@ class LogHandler:
         while True:
             for log_config in self.config['logs']:
                 self.process(log_config['file_path'])
-            time.sleep(0.1)
+            time.sleep(1)
 
     def process(self, file_path):
         if os.path.exists(file_path):
@@ -113,8 +113,8 @@ class LogHandler:
             print(f"Error sending log data to collector: {e}")
 
 def main():
-    config_file = '/home/oraclelee/Desktop/collector/config/config.cfg'
-    offsets_file = '/home/oraclelee/Desktop/collector/config/offsets.json'
+    config_file = '/home/edward/桌面/processor/config/config.cfg'
+    offsets_file = '/home/edward/桌面/processor/config/offsets.json'
 
     config_loader = ConfigLoader(config_file, offsets_file)
     config = config_loader.load_config()

@@ -96,20 +96,36 @@ class LogHandler(FileSystemEventHandler):#繼承FileSystemEventHandler
             "RAW_LOG": line,
             "TIMESTAMP": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
-
     def send_to_collector(self, log_data):
         try:
             response = requests.post('http://localhost:5050/log', json=log_data)
+            print(f"Response status code: {response.status_code}")
+            print(f"Response text: {response.text}")
+
             if response.status_code == 201:
-                print(f"Success , {response.status_code} , message : {response.json().get('message','N/A')}")
+                try:
+                    response_json = response.json()
+                    message = response_json.get('message', 'N/A')
+                except ValueError:
+                    message = 'Invalid JSON response'
+                print(f"Success, {response.status_code}, message: {message}")
             else:
-                print(f"Error , {response.status_code} , message : {response.json().get('message','N/A')}")
+                if response.text:
+                    try:
+                        response_json = response.json()
+                        message = response_json.get('message', 'N/A')
+                    except ValueError:
+                        message = 'Invalid JSON response'
+                else:
+                    message = 'Empty response'
+                print(f"Error, {response.status_code}, message: {message}")
         except requests.exceptions.RequestException as e:
             print(f"Error sending log data to collector: {e}")
 
+
 def main():
-    config_file = '/home/oraclelee/Desktop/collector/config/config.cfg'
-    offsets_file = '/home/oraclelee/Desktop/collector/config/offsets.json'
+    config_file = '/home/edward/桌面/processor/config/config.cfg'
+    offsets_file = '/home/edward/桌面/processor/config/offsets.json'
 
     config_loader = ConfigLoader(config_file, offsets_file)
     config = config_loader.load_config()#dictionary
