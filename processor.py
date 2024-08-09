@@ -11,8 +11,8 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 # 配置檔案路徑(全域變數)
-config_file = '/home/oraclelee/Desktop/collector/config/config.cfg'
-offsets_file = '/home/oraclelee/Desktop/collector/config/offsets.json'
+config_file = '/home/edward/桌面/processor/config/config.cfg'
+offsets_file = '/home/edward/桌面/processor/config/offsets.json'
 
 # 讀取yaml格式之配置檔案
 def load_config(config_file):
