@@ -3,6 +3,7 @@ import os
 import json
 import requests
 import yaml
+import platform
 from datetime import datetime , date
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -28,7 +29,7 @@ class ConfigLoader:
 
 class HostInfo:
     @staticmethod  # 跟class 或 instance都無關
-    def get_host_info():
+    def get_host_info_linux():
         subprocess.run(['chmod', '+x', 'get_host_info.sh'])
         result = subprocess.run(['./get_host_info.sh'], capture_output=True, text=True)
         host_name = None
@@ -42,6 +43,13 @@ class HostInfo:
             # rasie 是引發異常，觸發時會從try 跳到 except,找不到的話程式會停止，然後噴異常錯誤與附加訊息
             # ValueError當函數接收到一個具有正確類型但不正確值的參數時引發
             raise ValueError("HOST_NAME or HOST_IP not found in script output")  # 異常ValueError("附加訊息")
+        return host_name, host_ip
+
+    @staticmethod  # 跟class 或 instance都無關
+    def get_host_info_windows():
+        name = platform.uname()
+        host_name = name.node
+        host_ip = socket.gethostbyname(socket.gethostname())
         return host_name, host_ip
 
 class LogHandler(FileSystemEventHandler):  # 繼承FileSystemEventHandler
@@ -119,7 +127,12 @@ def main():
     config = config_loader.load_config()  # dictionary
     offsets = config_loader.load_offsets()  # dictionary
     save_offsets_func = config_loader.save_offsets  # save_offsets 就等於是ConfigLoader的save_offsets函式
-    host_info = HostInfo.get_host_info()
+
+    # 判斷是哪種系統來選擇方法
+    if platform.system() == 'Linux':
+        host_info = HostInfo.get_host_info_linux()
+    elif platform.system() == 'Windows':
+        host_info = HostInfo.get_host_info_windows()
 
     event_handler = LogHandler(config, host_info, offsets, save_offsets_func, collector_url)  # 設好監視處理程序
     observer = Observer()
