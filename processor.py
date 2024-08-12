@@ -72,14 +72,16 @@ class LogHandler(FileSystemEventHandler):  # 繼承FileSystemEventHandler
         last_offset = self.offsets.get(file_path, 0)
         with open(file_path, 'r', encoding='big5', errors='ignore') as f:
             lines = f.readlines()
-        new_lines = []
+
         if last_offset < len(lines):  # 代表有新增log
-            new_lines = lines[last_offset:]
-            self.offsets[file_path] = len(lines)
-            self.save_offsets(self.offsets)
-        for line in new_lines:
-            log_data = self.format_log_data(log_config, line.strip())  # .strip()是去除首尾空白（含tab, \n）
-            self.send_to_collector(log_data)
+            for i in range(last_offset , len(lines)):
+                line = lines[i].strip()# .strip()是去除首尾空白（含tab, \n）
+                log_data = self.format_log_data(log_config , line)
+                self.send_to_collector(log_data)
+
+                # 更新 offset，將其保存到文件中
+                self.offsets[file_path] = i + 1
+                self.save_offsets(self.offsets)
 
     def format_log_data(self, log_config, line):
         fields = log_config['fields']
