@@ -55,7 +55,19 @@ def check_error(level):
     # 檢查並處理 log level
     if level not in SUPPORTED_LEVELS:
         raise InvalidLogLevelError(f"Invalid log level: {level}")
+'''
+WHITE_LISTED_IPS = ["192.168.1.1", "127.0.0.1"]# 設定 IP 白名單
+def check_ip_whitelist():
+    client_ip = request.remote_addr
+    if client_ip not in WHITE_LISTED_IPS:
+        return False
+    return True
 
+@app.before_request
+def before_request():
+    if not check_ip_whitelist():
+        return jsonify({"error": "Forbidden", "message": "Your IP is not allowed to access this resource."}), 403
+'''
 @app.route('/log', methods=['POST'])
 def process_raw_log():
     try:
