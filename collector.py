@@ -12,10 +12,6 @@ from datetime import datetime
 app = Flask(__name__)
 
 # 自定義錯誤類別
-# 正則表達式錯誤處理
-class LogParseError(Exception):
-    pass
-
 class InvalidLogLevelError(Exception):
     pass
 
@@ -23,28 +19,23 @@ class MissingDataError(Exception):
     pass
 
 # 支援的日誌級別
-SUPPORTED_LEVELS = ['INFO', 'WARN', 'ERRO', 'DEBUG']
+SUPPORTED_LEVELS = ['INFO', 'WARN', 'ERRO', 'DEBUG', '']
 
 def parse_log(raw_log, split_rule):
-    log_time_match = re.search(split_rule['log_time_regex'], raw_log)
-    level_match = re.search(split_rule['level_regex'], raw_log)
-    message_match = re.search(split_rule['message_regex'], raw_log)
+    log_time_regex = split_rule.get('log_time_regex')
+    level_regex = split_rule.get('level_regex')
+    message_regex = split_rule.get('message_regex')
+    #要檢查是不是string(None不是str)
+    #用isinstance的原因是 不能把None放進正則表達逝去切割
+    log_time = re.search(log_time_regex, raw_log) if isinstance(log_time_regex, str) else None
+    level = re.search(level_regex, raw_log) if isinstance(level_regex, str) else None
+    message = re.search(message_regex, raw_log) if isinstance(message_regex, str) else None
 
-    log_time = log_time_match.group(1)
-    level = level_match.group(1).upper()
-    message = message_match.group(1)
-
-    if not all ([log_time_match, level_match, message_match]):
-        error_message = f"Failed to parse log:"
-        if not log_time_match:
-            error_message += " log time not found"
-        if not level_match:
-            error_message += " level not found"
-        if not message_match:
-            error_message += " message not found"
-        raise LogParseError(error_message)
-
-    return log_time, level, message
+    return (
+        log_time.group(1) if log_time else "",
+        level.group(1).upper() if level else "",
+        message.group(1) if message else ""
+    )
 
 def check_error(level):
     # 處理level
@@ -111,10 +102,6 @@ def process_raw_log():
     except InvalidLogLevelError as e:
         print(f"Error: {e}")
         return jsonify({"error": str(e)}), 402
-
-    except LogParseError as e:
-        print(f"Error: {e}")
-        return jsonify({"error": str(e)}), 500
 
     except Exception as e:
         print(f"Unexpected Error: {e}")

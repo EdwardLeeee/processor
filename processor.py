@@ -3,7 +3,7 @@ import os
 import json
 import requests
 import yaml
-from datetime import datetime
+from datetime import datetime , date
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -112,7 +112,7 @@ class LogHandler(FileSystemEventHandler):  # 繼承FileSystemEventHandler
 
 def main():
     config_file = '/home/oraclelee/Desktop/collector/config/config.cfg'
-    offsets_file = '/home/oraclelee/Desktop/collector/config/offsets.json'
+    offsets_file =f'/home/oraclelee/Desktop/collector/config/offsets{date.today()}.json'
     collector_url = 'http://localhost:5050/log'  # 將URL變成參數
 
     config_loader = ConfigLoader(config_file, offsets_file)
@@ -139,4 +139,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
