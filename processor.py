@@ -28,28 +28,30 @@ class ConfigLoader:
             return json.load(f)  # 把json做成dictionary
 
 class HostInfo:
-    @staticmethod  # 跟class 或 instance都無關
-    def get_host_info_linux():
-        subprocess.run(['chmod', '+x', 'get_host_info.sh'])
-        result = subprocess.run(['./get_host_info.sh'], capture_output=True, text=True)
-        host_name = None
-        host_ip = None
-        for line in result.stdout.splitlines():
-            if line.startswith("HOST_NAME="):
-                host_name = line.split('=', 1)[1].strip()
-            elif line.startswith("HOST_IP="):
-                host_ip = line.split('=', 1)[1].strip()
-        if not host_name or not host_ip:
-            # rasie 是引發異常，觸發時會從try 跳到 except,找不到的話程式會停止，然後噴異常錯誤與附加訊息
-            # ValueError當函數接收到一個具有正確類型但不正確值的參數時引發
-            raise ValueError("HOST_NAME or HOST_IP not found in script output")  # 異常ValueError("附加訊息")
-        return host_name, host_ip
+    @staticmethod
+    def get_host_info():
+        system_type = platform.system()  # 判斷系統類型
+        if system_type == "Windows":
+            # Windows 系統的處理方式
+            name = platform.uname()
+            host_name = name.node
+            host_ip = socket.gethostbyname(socket.gethostname())
+        elif system_type == "Linux":
+            # Linux 系統的處理方式
+            subprocess.run(['chmod', '+x', 'get_host_info.sh'])
+            result = subprocess.run(['./get_host_info.sh'], capture_output=True, text=True)
+            host_name = None
+            host_ip = None
+            for line in result.stdout.splitlines():
+                if line.startswith("HOST_NAME="):
+                    host_name = line.split('=', 1)[1].strip()
+                elif line.startswith("HOST_IP="):
+                    host_ip = line.split('=', 1)[1].strip()
+            if not host_name or not host_ip:
+                raise ValueError("HOST_NAME or HOST_IP not found in script output")
+        else:
+            raise ValueError(f"Unsupported system type: {system_type}")
 
-    @staticmethod  # 跟class 或 instance都無關
-    def get_host_info_windows():
-        name = platform.uname()
-        host_name = name.node
-        host_ip = socket.gethostbyname(socket.gethostname())
         return host_name, host_ip
 
 class LogHandler(FileSystemEventHandler):  # 繼承FileSystemEventHandler
@@ -105,7 +107,7 @@ class LogHandler(FileSystemEventHandler):  # 繼承FileSystemEventHandler
             "PROCESS_NAME": os.path.basename(log_config['file_path']).split('.')[0],
             "REGEX": regex,
             "RAW_LOG": line,
-            "TIMESTAMP": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            #"TIMESTAMP": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
 
     def send_to_collector(self, log_data):
@@ -127,12 +129,7 @@ def main():
     config = config_loader.load_config()  # dictionary
     offsets = config_loader.load_offsets()  # dictionary
     save_offsets_func = config_loader.save_offsets  # save_offsets 就等於是ConfigLoader的save_offsets函式
-
-    # 判斷是哪種系統來選擇方法
-    if platform.system() == 'Linux':
-        host_info = HostInfo.get_host_info_linux()
-    elif platform.system() == 'Windows':
-        host_info = HostInfo.get_host_info_windows()
+    host_info = HostInfo.get_host_info()
 
     event_handler = LogHandler(config, host_info, offsets, save_offsets_func, collector_url)  # 設好監視處理程序
     observer = Observer()
