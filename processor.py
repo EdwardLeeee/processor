@@ -9,6 +9,10 @@ from datetime import datetime , date
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
+class ServerConnectionError(Exception):
+    """自定義異常類型，用於處理伺服器連接錯誤"""
+    pass
+
 class ConfigLoader:
     def __init__(self, config_path, offsets_path):
         self.config_path = config_path
@@ -96,10 +100,12 @@ class LogHandler(FileSystemEventHandler):  # 繼承FileSystemEventHandler
 
     def format_log_data(self, log_config, line):
         fields = log_config['fields']
+        level_rule = log_config['level_rule']
         regex = {
             "log_time_regex": fields['log_time'],
             "level_regex": fields['level'],
-            "message_regex": fields['content']
+            "message_regex": fields['content'],
+            "level_rule": level_rule
         }
         return {
             "HOST_NAME": self.host_info[0],
@@ -107,7 +113,7 @@ class LogHandler(FileSystemEventHandler):  # 繼承FileSystemEventHandler
             "SYSTEM_TYPE": log_config['system_type'],
             "PROCESS_NAME": os.path.basename(log_config['file_path']).split('.')[0],
             "REGEX": regex,
-            "RAW_LOG": line,
+            "RAW_LOG": line
             #"TIMESTAMP": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
 
@@ -116,8 +122,20 @@ class LogHandler(FileSystemEventHandler):  # 繼承FileSystemEventHandler
             response = requests.post(self.collector_url, json=log_data)
             if response.status_code == 201:
                 print(f"Success , {response.status_code} , message : {response.json().get('message','N/A')}")
+            elif response.status_code == 502 or  response.status_code == 500:
+                print(f"Error , {response.status_code} , message : {response.json().get('message','N/A')}")
+                sys.exit(1)
+            elif response.status_code == 400 or  response.status_code == 402:
+                print(f"Error , {response.status_code} , message : {response.json().get('message','N/A')}")
+                print('Please check the config of log :')
+                print(log_data)
+                sys.exit(1)
             else:
                 print(f"Error , {response.status_code} , message : {response.json().get('message','N/A')}")
+
+        except requests.exceptions.ConnectionError :# collector沒開
+            print("Failed to connect to the collector server. Please check if the server is running.")
+            sys.exit(1)
         except requests.exceptions.RequestException as e:
             print(f"Error sending log data to collector: {e}")
             sys.exit(1)  # 中止程式，傳回碼 1 表示異常退出
