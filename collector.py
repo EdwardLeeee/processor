@@ -54,7 +54,6 @@ def process_raw_log():
 
         if missing_fields:
             raise MissingDataError(f"Client missing required fields in the request: {', '.join(missing_fields)}")
-
         log_time, level, message = parse_log(raw_log, split_rule)
 
         check_error(level)
@@ -69,7 +68,8 @@ def process_raw_log():
             "LOG_TIME": f"{datetime.now().strftime('%Y-%m-%d')} {log_time}"
         }
         # 傳送 log 資料至最終儲存端點
-        response = requests.post('http://localhost:5000/log', json=log_data)
+        response = requests.post('http://172.20.10.3:5000/log', json=log_data)
+
         if response.status_code == 201:
             return jsonify({"message": "Log processed", "status": "success"}), 201
         else:
