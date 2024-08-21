@@ -18,19 +18,38 @@ class ConfigLoader:
         self.config_path = config_path
         self.offsets_path = offsets_path
 
-    def save_offsets(self, offsets):
-        with open(self.offsets_path, 'w') as f:  # w 是覆寫
-            json.dump(offsets, f, indent=4)  # dump 是把資料用JSON存起來, indent是讓一個key:value就一行
-
     def load_config(self):
         with open(self.config_path, 'r') as f:
             return yaml.safe_load(f)  # 讀取yaml格式的config,做成dictionary
+
+    def save_offsets(self, offsets):
+        with open(self.offsets_path, 'w') as f:  # w 是覆寫
+            json.dump(offsets, f, indent=4)  # dump 是把資料用JSON存起來, indent是讓一個key:value就一行
 
     def load_offsets(self):
         if not os.path.exists(self.offsets_path):
             return {}
         with open(self.offsets_path, 'r') as f:
             return json.load(f)  # 把json做成dictionary
+
+class APIManager:
+    def __init__(self, collector_url):
+        self.collector_url = f"{collector_url}/verify-whitelist"
+
+    def load_api_token(self):
+        print("Loading API token...")
+        api_key_data = self.get_api_token()
+        return api_key_data
+
+    def get_api_token(self):
+        response = requests.get(self.collector_url)
+        #print("Response:", response.json())
+        if response.status_code == 200:
+            return response.json()
+        else:
+            print("Error:", response.json().get("mesage","N/A"))
+            sys.exit(1)
+            return None
 
 class HostInfo:
     @staticmethod
@@ -60,12 +79,13 @@ class HostInfo:
         return host_name, host_ip
 
 class LogHandler(FileSystemEventHandler):  # 繼承FileSystemEventHandler
-    def __init__(self, config, host_info, offsets, save_offsets_func, collector_url):
+    def __init__(self, config, host_info, offsets, save_offsets_func, collector_url,api_key_data):
         self.config = config  # dictionary
         self.host_info = host_info
         self.offsets = offsets  # dictionary
         self.save_offsets = save_offsets_func  # 一個function
         self.collector_url = collector_url  # 新增collector_url變數
+        self.api_key_data = api_key_data
         # 初始化,更新一遍所有log狀態
         for log_config in self.config['logs']:
             self.process(log_config['file_path'])
@@ -119,19 +139,42 @@ class LogHandler(FileSystemEventHandler):  # 繼承FileSystemEventHandler
 
     def send_to_collector(self, log_data):
         try:
-            response = requests.post(self.collector_url, json=log_data)
-            if response.status_code == 201:
-                print(f"Success , {response.status_code} , message : {response.json().get('message','N/A')}")
-            elif response.status_code == 502 or  response.status_code == 500:
-                print(f"Error , {response.status_code} , message : {response.json().get('message','N/A')}")
+            headers={"collector-api-key": self.api_key_data['collector-api-key']}
+            response = requests.post(f'{self.collector_url}/log', json=log_data , headers = headers)
+            if response.status_code == 401:# 如果401，重新请求新的API Key
+                print(f"API key error: {response.status_code}, {response.json().get('message','N/A')}")
+                api_manager = APIManager(self.collector_url)
+                self.api_key_data = api_manager.load_api_token()
+
+                if self.api_key_data:
+                    headers={"collector-api-key": self.api_key_data['collector-api-key']}
+                    response = requests.post(f'{self.collector_url}/log', json=log_data,headers=headers)
+                else:
+                    print("Failed to load API token.")
+                    sys.exit(1)  # 退出程序以防止继续运行没有API key
+
+            elif response.status_code == 201:
+                print(f"Log sent successfully: {response.status_code}")
+            elif response.status_code == 400:
+                print(f"Log error (Data missing): {response.status_code}, {response.json().get('message','N/A')}")
+                print('Please check sent data and config of log. If a column does not exist, send an empty string.')
                 sys.exit(1)
-            elif response.status_code == 400 or  response.status_code == 402:
-                print(f"Error , {response.status_code} , message : {response.json().get('message','N/A')}")
-                print('Please check the config of log :')
-                print(log_data)
+            elif response.status_code == 402:
+                print(f"Log error (Format issue): {response.status_code}. {response.json().get('message','N/A')}")
+                print('Please check the config of log.')
+                sys.exit(1)
+            elif response.status_code == 403:
+                print(f"Permission error: {response.status_code}. {response.json().get('message','N/A')}")
+                sys.exit(1)
+            elif response.status_code == 500:
+                print(f"Error: {response.status_code}. {response.json().get('message','N/A')}")
+                sys.exit(1)
+            elif response.status_code == 502:
+                print(f"Server connection error: {response.status_code}. Please restart the logger.")
                 sys.exit(1)
             else:
-                print(f"Error , {response.status_code} , message : {response.json().get('message','N/A')}")
+                print(f"Unexpected error: {response.status_code}, {response.json().get('message','N/A')}")
+                sys.exit(1)
 
         except requests.exceptions.ConnectionError :# collector沒開
             print("Failed to connect to the collector server. Please check if the server is running.")
@@ -139,18 +182,24 @@ class LogHandler(FileSystemEventHandler):  # 繼承FileSystemEventHandler
         except requests.exceptions.RequestException as e:
             print(f"Error sending log data to collector: {e}")
             sys.exit(1)  # 中止程式，傳回碼 1 表示異常退出
+
 def main():
     config_file = '/home/oraclelee/Desktop/collector/config/config.cfg'
     offsets_file =f'/home/oraclelee/Desktop/collector/config/offsets{date.today()}.json'
-    collector_url = 'http://localhost:5050/log'  # 將URL變成參數
+    collector_url = 'http://localhost:5050'  # 將URL變成參數
 
     config_loader = ConfigLoader(config_file, offsets_file)
+
     config = config_loader.load_config()  # dictionary
     offsets = config_loader.load_offsets()  # dictionary
     save_offsets_func = config_loader.save_offsets  # save_offsets 就等於是ConfigLoader的save_offsets函式
-    host_info = HostInfo.get_host_info()
+    host_info = HostInfo.get_host_info()# [ host_name , host_ip]
 
-    event_handler = LogHandler(config, host_info, offsets, save_offsets_func, collector_url)  # 設好監視處理程序
+    api_manager = APIManager( collector_url)
+    api_token_data = api_manager.load_api_token()
+
+    # 設好監視處理程序
+    event_handler = LogHandler(config, host_info, offsets, save_offsets_func, collector_url,api_token_data)
     observer = Observer()
     # 為每個檔案設立監視器
     for log_config in config['logs']:

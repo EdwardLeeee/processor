@@ -1,8 +1,12 @@
 from flask import Flask, request, jsonify
 import requests
+import requests.exceptions
+import sys
 import json
 import re
-from datetime import datetime
+import hashlib
+import secrets
+from datetime import datetime, timedelta
 
 # 功能：
 # 接收 Client 傳來的主機資訊及切割規則。
@@ -17,7 +21,59 @@ class InvalidLogLevelError(Exception):
 
 class MissingDataError(Exception):
     pass
+class PermissionError(Exception):
+    pass
 
+# 用戶 API 金鑰的到期時間（例如24小時）
+TOKEN_EXPIRATION_HOURS = 1
+def generate_api_key(ip_address):
+    # 用OS提供的密碼學安全偽隨機數生成器（CSPRNG) 生成 32 Byte 的隨機數字(32*8 bit = 64個16進位字符)
+    # e.g. 00000000 01000100 11111111.... = 0x0044FF.....
+    api_key = secrets.token_hex(32)
+
+    #將生成的 API 金鑰和傳入的 IP 地址拼接成一個字符串，然後進行 SHA-256 哈希加密。
+    #最後，使用 hexdigest() 將哈希結果轉換為 64 字符的十六進制字符串。
+    hashed_key = hashlib.sha256((api_key + ip_address).encode()).hexdigest()
+    expiration_date = datetime.now() + timedelta(seconds=TOKEN_EXPIRATION_HOURS)# 到期時間
+    return hashed_key, expiration_date
+
+# 讀取 IP白名單 JSON 檔案
+with open('config/whitelist.json', 'r') as f:
+    data = json.load(f)
+whitelist_ips = data['ips']# 獲取 IP 白名單
+
+API_TOKENS = {}# 允許的 API 金鑰列表和對應的到期日期
+# 壓測用
+API_TOKENS["202408testing"] = datetime.now() + timedelta(hours=TOKEN_EXPIRATION_HOURS)
+#
+@app.route('/verify-whitelist', methods=['GET'])
+def verify_and_generate_key():
+    client_ip = request.remote_addr
+    #print("IP:", client_ip)
+    if client_ip in whitelist_ips:
+        hashed_key, expiration_date = generate_api_key(client_ip)# 拿到token 和到期時間
+        API_TOKENS[hashed_key] = expiration_date
+        #print("API_TOKENS:", API_TOKENS)
+        # 回傳API Key給client
+        return jsonify({
+            "collector-api-key": hashed_key,
+            "expire-time": expiration_date.isoformat()
+        }),200
+    else:
+        return jsonify({"mesage": "IP not in whitelist"}), 403
+
+def validate_api_token(f):# f 是原函數
+    def decorator(*args, **kwargs):#*args 和 **kwargs 允許裝飾器接收任意數量的位置參數和關鍵字參數
+        api_key = request.headers.get('collector-api-key')
+        expiration_date = API_TOKENS.get(api_key)# = API_TOKENS[api_key] or None
+        if not api_key or not expiration_date:#
+            return jsonify({"message": "Unauthorized access (Wrong key or collector restarted). Please delete old key and acquire new key."}), 401
+        if datetime.now() > expiration_date:
+            return jsonify({"message": "API key expired. Please delete old key and acquire new key."}), 401
+        return f(*args, **kwargs)
+    return decorator
+
+# 藉由正則表達式切割raw data
 def parse_log(raw_log, split_rule):
     log_time_match = re.search(split_rule['log_time_regex'], raw_log) if isinstance(split_rule['log_time_regex'], str) else None
     level_match = re.search(split_rule['level_regex'], raw_log) if isinstance(split_rule['level_regex'], str) else None
@@ -40,6 +96,7 @@ def check_error(level):
         raise InvalidLogLevelError(f"Invalid log level: {level}")
 
 @app.route('/log', methods=['POST'])
+@validate_api_token
 def process_raw_log():
     try:
         raw_log = request.json.get('RAW_LOG')
@@ -79,6 +136,7 @@ def process_raw_log():
     except requests.exceptions.ConnectionError:
         print("Failed to connect to the logger server. Please check if the server is running.")
         return jsonify({"message": "Failed to connect to the logger server"}), 502
+
     except MissingDataError as e:
         print(f"Error: {e}")
         return jsonify({"message": str(e)}), 400
@@ -87,6 +145,10 @@ def process_raw_log():
         print(f"Error: {e}")
         return jsonify({"message": str(e)}), 402
 
+    except PermissionError as e:
+        print(f"Error: {e}")
+        return jsonify({"message": str(e)}), 403
+
     except Exception as e:
         print(f"Unexpected Error: {e}")
         return jsonify({"message": "Internal server error"}), 500
@@ -94,7 +156,10 @@ def process_raw_log():
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5050,threaded = True)
     # 201 : 成功
+    # 200 : get key 成功
     # 502 : 連不上server(logger)
     # 400 : JSON 資料有缺失
-    # 500 : 非上述異常
+    # 401 : key 過期了
     # 402 : log  level 格式非法
+    # 403 : IP 不在白名單
+    # 500 : 非上述異常
